@@ -1,2 +1,0 @@
-"# gitEducation" 
-# StuCafeInfoFo
