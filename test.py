@@ -1,0 +1,118 @@
+#영상에서 얼굴인식을 통해 눈깜박임을 감지하는 코드
+import cv2, dlib
+import numpy as np
+from imutils import face_utils
+from keras.models import load_model
+
+count = [1,1,1,1,1,1,1,1,1]
+
+
+IMG_SIZE = (34, 26)
+
+detector = dlib.get_frontal_face_detector()
+predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
+
+model = load_model('models/2022_12_14_10_26_27.h5')
+model.summary()
+
+# 아마 공식 찾아봐야할듯  
+def crop_eye(img, eye_points):
+  x1, y1 = np.amin(eye_points, axis=0)
+  x2, y2 = np.amax(eye_points, axis=0)
+  cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+
+  w = (x2 - x1) * 1.2
+  h = w * IMG_SIZE[1] / IMG_SIZE[0]
+
+  margin_x, margin_y = w / 2, h / 2
+
+  min_x, min_y = int(cx - margin_x), int(cy - margin_y)
+  max_x, max_y = int(cx + margin_x), int(cy + margin_y)
+
+  # rint - 반올림
+  eye_rect = np.rint([min_x, min_y, max_x, max_y]).astype(np.int)
+
+  eye_img = gray[eye_rect[1]:eye_rect[3], eye_rect[0]:eye_rect[2]]
+
+  return eye_img, eye_rect
+
+# main
+if __name__ == "__main__":
+# cap = cv2.VideoCapture('2.mp4') # 동영상으로 재생 시
+  cap = cv2.VideoCapture(0)
+
+  # 웹캡이나 동영상이 열려 있을 경우
+  while cap.isOpened():
+    # 비디오를 잘 읽었으면 ret은 True 아니면 False / 읽은 프레임 = img_ori
+    ret, img_ori = cap.read()
+
+    # if not은 조건이 False일때 실행됨.
+    if not ret:
+      break
+    
+    # 크기 변환 / 자세한 정보 - https://deep-learning-study.tistory.com/185
+    img_ori = cv2.resize(img_ori, dsize=(0, 0), fx=0.5, fy=0.5)
+
+    
+    img = img_ori.copy()
+
+    # 이미지를 흑백으로 변경
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    
+    faces = detector(gray)
+
+    for face in faces:
+      shapes = predictor(gray, face)
+      shapes = face_utils.shape_to_np(shapes)
+
+      # eye point = 얼굴 점으로 찍은것 - https://blog.kakaocdn.net/dn/baNXvY/btqChGYfEU4/l59Bgkbdir5CQ4wdDqZIw0/img.png
+      eye_img_l, eye_rect_l = crop_eye(gray, eye_points=shapes[36:42])
+      eye_img_r, eye_rect_r = crop_eye(gray, eye_points=shapes[42:48])
+
+      eye_img_l = cv2.resize(eye_img_l, dsize=IMG_SIZE)
+      eye_img_r = cv2.resize(eye_img_r, dsize=IMG_SIZE)
+      eye_img_r = cv2.flip(eye_img_r, flipCode=1)
+
+      cv2.imshow('l', eye_img_l)
+      cv2.imshow('r', eye_img_r)
+
+      eye_input_l = eye_img_l.copy().reshape((1, IMG_SIZE[1], IMG_SIZE[0], 1)).astype(np.float32) / 255.
+      eye_input_r = eye_img_r.copy().reshape((1, IMG_SIZE[1], IMG_SIZE[0], 1)).astype(np.float32) / 255.
+
+      pred_l = model.predict(eye_input_l)
+      pred_r = model.predict(eye_input_r)
+
+      # visualize
+      state_l = 'O %.1f' if pred_l > 0.1 else '- %.1f'
+      state_r = 'O %.1f' if pred_r > 0.1 else '- %.1f'
+      # print(state_l)
+      # print(state_r)
+      state_l = state_l % pred_l
+      state_r = state_r % pred_r
+      # print(state_l)
+      # print(state_r)
+      if len(count) > 10:
+        count.pop(0)
+      if pred_l == 0.0 and pred_r == 0.0:
+        count.append(0)
+      else:
+        count.append(1)
+
+      i = sum(count)
+      if i < 8:
+        # putText(Image, text, org, font, fontScale, color) 
+        cv2.putText(img_ori, "경고", (10, 400), cv2.FONT_HERSHEY_PLAIN)
+        print(count)
+
+
+      # 박스 쳐주기
+      cv2.rectangle(img, pt1=tuple(eye_rect_l[0:2]), pt2=tuple(eye_rect_l[2:4]), color=(255,255,255), thickness=2)
+      cv2.rectangle(img, pt1=tuple(eye_rect_r[0:2]), pt2=tuple(eye_rect_r[2:4]), color=(255,255,255), thickness=2)
+
+      cv2.putText(img, state_l, tuple(eye_rect_l[0:2]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
+      cv2.putText(img, state_r, tuple(eye_rect_r[0:2]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
+
+    cv2.imshow('result', img)
+    if cv2.waitKey(33) == ord('q'):
+      break
